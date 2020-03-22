@@ -11,6 +11,7 @@ import struct
 import sys
 import binascii
 import codecs
+from urllib import parse
 
 from builtins import bytes, int
 
@@ -83,13 +84,14 @@ class WebAuthnUserDataMissing(Exception):
 
 
 class WebAuthnMakeCredentialOptions(object):
-
     _attestation_forms = {'none', 'indirect', 'direct'}
     _user_verification = {'required', 'preferred', 'discouraged'}
+    _authenticator_attachment = {'cross-platform', 'platform'}
 
     def __init__(self, challenge, rp_name, rp_id, user_id, username,
                  display_name, icon_url, timeout=60000, attestation='direct',
-                 user_verification=None):
+                 user_verification=None, authenticator_attachment=None,
+                 require_resident_key=False):
         self.challenge = challenge
         self.rp_name = rp_name
         self.rp_id = rp_id
@@ -98,6 +100,7 @@ class WebAuthnMakeCredentialOptions(object):
         self.display_name = display_name
         self.icon_url = icon_url
         self.timeout = timeout
+        self.require_resident_key = require_resident_key
 
         attestation = str(attestation).lower()
         if attestation not in self._attestation_forms:
@@ -108,9 +111,18 @@ class WebAuthnMakeCredentialOptions(object):
         if user_verification is not None:
             user_verification = str(user_verification).lower()
             if user_verification not in self._user_verification:
-                raise ValueError('user_verification must be a string and one of ' +
-                                 ', '.join(self._user_verification))
+                raise ValueError(
+                    'user_verification must be a string and one of ' +
+                    ', '.join(self._user_verification))
         self.user_verification = user_verification
+
+        if authenticator_attachment is not None:
+            authenticator_attachment = str(authenticator_attachment).lower()
+            if authenticator_attachment not in self._authenticator_attachment:
+                raise ValueError(
+                    'user_verification must be a string and one of ' +
+                    ', '.join(self._authenticator_attachment))
+        self.authenticator_attachment = authenticator_attachment
 
     @property
     def registration_dict(self):
@@ -140,16 +152,23 @@ class WebAuthnMakeCredentialOptions(object):
             # Relying Parties may use AttestationConveyancePreference to specify their
             # preference regarding attestation conveyance during credential generation.
             'attestation': self.attestation,
-            'extensions': {
-                # Include location information in attestation.
-                'webauthn.loc': True
-            }
+            # 'extensions': {
+            #     # Include location information in attestation.
+            #     'webauthn.loc': True
+            # }
+        }
+
+        registration_dict['authenticatorSelection'] = {
+            "requireResidentKey": self.require_resident_key
         }
 
         if self.user_verification is not None:
-            registration_dict['authenticatorSelection'] = {
-                'userVerification': self.user_verification
-            }
+            registration_dict['authenticatorSelection'][
+                'userVerification'] = self.user_verification
+
+        if self.authenticator_attachment is not None:
+            registration_dict['authenticatorSelection'][
+                'authenticatorAttachment'] = self.authenticator_attachment
 
         if self.icon_url:
             registration_dict['user']['icon'] = self.icon_url
@@ -162,7 +181,8 @@ class WebAuthnMakeCredentialOptions(object):
 
 
 class WebAuthnAssertionOptions(object):
-    def __init__(self, webauthn_user, challenge, timeout=60000, userVerification='discouraged'):
+    def __init__(self, webauthn_user, challenge, timeout=60000,
+                 userVerification='discouraged'):
         if isinstance(webauthn_user, list):
             self.webauthn_users = webauthn_user
         else:
@@ -173,10 +193,12 @@ class WebAuthnAssertionOptions(object):
 
     @property
     def assertion_dict(self):
-        if not isinstance(self.webauthn_users, list) or len(self.webauthn_users) < 1:
+        if not isinstance(self.webauthn_users, list) or len(
+                self.webauthn_users) < 1:
             raise AuthenticationRejectedException('Invalid user list.')
         if len(set([u.rp_id for u in self.webauthn_users])) != 1:
-            raise AuthenticationRejectedException('Invalid (mutliple) RP IDs in user list.')
+            raise AuthenticationRejectedException(
+                'Invalid (mutliple) RP IDs in user list.')
         for user in self.webauthn_users:
             if not isinstance(user, WebAuthnUser):
                 raise AuthenticationRejectedException('Invalid user type.')
@@ -190,7 +212,7 @@ class WebAuthnAssertionOptions(object):
             acceptable_credentials.append({
                 'type': 'public-key',
                 'id': user.credential_id,
-                'transports': ['usb', 'nfc', 'ble', 'internal'],
+                # 'transports': ['usb', 'nfc', 'ble', 'internal'],
             })
 
         assertion_dict = {
@@ -327,9 +349,12 @@ class WebAuthnRegistrationResponse(object):
 
             # Step 2.
             #
-            # Let attCert be the value of the first element of x5c. Let certificate
-            # public key be the public key conveyed by attCert. If certificate public
-            # key is not an Elliptic Curve (EC) public key over the P-256 curve,
+            # Let attCert be the value of the first element of x5c. Let
+            # certificate
+            # public key be the public key conveyed by attCert. If
+            # certificate public
+            # key is not an Elliptic Curve (EC) public key over the P-256
+            # curve,
             # terminate this algorithm and return an appropriate error.
             att_cert = att_stmt.get('x5c')[0]
             x509_att_cert = load_der_x509_certificate(att_cert,
@@ -345,13 +370,20 @@ class WebAuthnRegistrationResponse(object):
             # claimed credentialId and credentialPublicKey from
             # authenticatorData.attestedCredentialData.
 
-            # The credential public key encoded in COSE_Key format, as defined in Section 7
-            # of [RFC8152], using the CTAP2 canonical CBOR encoding form. The COSE_Key-encoded
-            # credential public key MUST contain the optional "alg" parameter and MUST NOT
-            # contain any other optional parameters. The "alg" parameter MUST contain a
-            # COSEAlgorithmIdentifier value. The encoded credential public key MUST also
-            # contain any additional required parameters stipulated by the relevant key type
-            # specification, i.e., required for the key type "kty" and algorithm "alg" (see
+            # The credential public key encoded in COSE_Key format,
+            # as defined in Section 7
+            # of [RFC8152], using the CTAP2 canonical CBOR encoding form.
+            # The COSE_Key-encoded
+            # credential public key MUST contain the optional "alg"
+            # parameter and MUST NOT
+            # contain any other optional parameters. The "alg" parameter
+            # MUST contain a
+            # COSEAlgorithmIdentifier value. The encoded credential public
+            # key MUST also
+            # contain any additional required parameters stipulated by the
+            # relevant key type
+            # specification, i.e., required for the key type "kty" and
+            # algorithm "alg" (see
             # Section 8 of [RFC8152]).
             try:
                 public_key_alg, credential_public_key = _load_cose_public_key(
@@ -539,7 +571,8 @@ class WebAuthnRegistrationResponse(object):
                 #   * Validate that alg matches the algorithm of the
                 #     credentialPublicKey in authenticatorData.
                 try:
-                    public_key_alg, credential_public_key = _load_cose_public_key(
+                    public_key_alg, credential_public_key = \
+                        _load_cose_public_key(
                         credential_pub_key)
                 except COSEKeyException as e:
                     raise RegistrationRejectedException(str(e))
@@ -1273,10 +1306,13 @@ def _verify_origin(client_data, origin):
         return False
 
     client_data_origin = client_data.get('origin')
+    c_effective_domain = parse.urlparse(client_data_origin).netloc.split(":")[
+                         :-1]
+    origin_effective_domain = parse.urlparse(origin).netloc.split(":")[:-1]
 
     if not client_data_origin:
         return False
-    if client_data_origin != origin:
+    if c_effective_domain != origin_effective_domain:
         return False
 
     return True
