@@ -741,7 +741,7 @@ class WebAuthnRegistrationResponse(object):
             # extensions are in use.
             registration_client_extensions = self.registration_response.get(
                 'registrationClientExtensions')
-            if registration_client_extensions:
+            if registration_client_extensions and registration_client_extensions != 'undefined':
                 rce = json.loads(registration_client_extensions)
                 if not _verify_client_extensions(rce, self.expected_registration_client_extensions):
                     raise RegistrationRejectedException(
