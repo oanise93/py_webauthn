@@ -1306,9 +1306,8 @@ def _verify_origin(client_data, origin):
         return False
 
     client_data_origin = client_data.get('origin')
-    c_effective_domain = parse.urlparse(client_data_origin).netloc.split(":")[
-                         :-1]
-    origin_effective_domain = parse.urlparse(origin).netloc.split(":")[:-1]
+    c_effective_domain = parse.urlparse(client_data_origin).netloc.split(":")[0]
+    origin_effective_domain = parse.urlparse(origin).netloc.split(":")[0]
 
     if not client_data_origin:
         return False
